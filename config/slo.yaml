@@ -1,4 +1,5 @@
 service: day13-l3a-monitoring-llmops-lab
+
 primary_slo:
   name: fast_successful_requests
   window: 28d
@@ -7,9 +8,18 @@ primary_slo:
     total_event: 'event == "request_received"'
   target_percent: 99.5
   error_budget_percent: 0.5
-  note: Học viên phải giải thích hoặc điều chỉnh ngưỡng bằng baseline của mình.
+  note: |
+    P95 latency threshold set at 3000ms based on user experience baseline.
+    This accommodates normal retrieval (1-2s) + generation (0.5-1s) + overhead.
+    99.5% target allows ~3.6 hours downtime per 28 days (0.5% error budget).
+    If response times exceed 3s more than 0.5% of the time, alert is triggered.
+
 guardrails:
   error_rate_pct_max: 2
+    # Production errors should stay below 2%; above this indicates systemic issue
   daily_cost_usd_max: 2.5
+    # Daily cost cap prevents budget surprises; monitor for token inflation
   quality_score_avg_min: 0.75
+    # Quality proxy (heuristic) should average 0.75+; below indicates bad retrieval/generation
   retrieval_success_rate_pct_min: 90
+    # RAG reliability target; <90% means vector store or fallback issues
