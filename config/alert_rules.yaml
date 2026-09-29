@@ -5,6 +5,7 @@ alerts:
     duration: 5m
     type: symptom-based
     channel: slack
+    slack_channel: "#incidents"
     owner: platform-team
     runbook: docs/alerts.md#alert-1
 
@@ -14,6 +15,7 @@ alerts:
     duration: 10m
     type: symptom-based
     channel: slack
+    slack_channel: "#incidents"
     owner: rag-team
     runbook: docs/alerts.md#alert-2
 
@@ -23,5 +25,6 @@ alerts:
     duration: 10m
     type: symptom-based
     channel: slack
+    slack_channel: "#incidents"
     owner: platform-team
     runbook: docs/alerts.md#alert-3

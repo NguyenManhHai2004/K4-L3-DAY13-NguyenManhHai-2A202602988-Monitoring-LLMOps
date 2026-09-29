@@ -12,7 +12,7 @@ CORPUS = {
 }
 
 
-@observe(name="retriever", as_type="retrieval", capture_input=False, capture_output=False)
+@observe(name="retriever", as_type="retriever", capture_input=False, capture_output=False)
 def retrieve(message: str) -> list[str]:
     if STATE["tool_fail"]:
         raise RuntimeError("Vector store timeout")

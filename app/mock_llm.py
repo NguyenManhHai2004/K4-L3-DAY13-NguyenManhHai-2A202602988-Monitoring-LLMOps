@@ -5,7 +5,10 @@ import time
 from dataclasses import dataclass
 
 from .incidents import STATE
-from .tracing import observe
+from .tracing import get_langfuse_client, observe
+
+INPUT_USD_PER_MTOK = 3
+OUTPUT_USD_PER_MTOK = 15
 
 
 @dataclass
@@ -39,6 +42,15 @@ class FakeLLM:
         answer = (
             "Starter answer. You should improve this output logic and add better quality checks. "
             "Use retrieved context and keep responses concise."
+        )
+        get_langfuse_client().update_current_generation(
+            model=self.model,
+            usage_details={"input": input_tokens, "output": output_tokens},
+            cost_details={
+                "input": input_tokens * INPUT_USD_PER_MTOK / 1_000_000,
+                "output": output_tokens * OUTPUT_USD_PER_MTOK / 1_000_000,
+            },
+            metadata={"ttft_ms": ttft_ms},
         )
         return FakeResponse(
             text=answer,

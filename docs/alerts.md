@@ -1,6 +1,6 @@
 # Runbooks - CP2 Alerts
 
-## Alert 1: High tail latency (P95 > 3s)
+## Alert 1
 
 - **Tên:** high_tail_latency
 - **Severity:** CRITICAL
@@ -19,7 +19,7 @@
   - Temporarily disable complex query expansion
 - **Owner:** platform-team
 
-## Alert 2: Retrieval failure spike (< 90% success)
+## Alert 2
 
 - **Tên:** retrieval_failure_spike
 - **Severity:** HIGH
@@ -38,7 +38,7 @@
   - Fall back to fallback retriever or disable filtering
 - **Owner:** rag-team
 
-## Alert 3: Error rate elevation (> 2%)
+## Alert 3
 
 - **Tên:** error_rate_elevation
 - **Severity:** HIGH

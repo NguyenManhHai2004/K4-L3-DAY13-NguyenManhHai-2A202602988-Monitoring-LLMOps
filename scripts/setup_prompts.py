@@ -62,8 +62,7 @@ def setup_prompts() -> None:
             "name": PROMPT_NAME,
             "type": "text",
             "prompt": PROMPT_TEMPLATE,
-            "tags": ["baseline", "production"],
-            "isActive": True,
+            "labels": ["baseline", "production"],
         }
 
         result_v1 = make_api_call(public_key, secret_key, base_url, v1_payload)
@@ -77,8 +76,7 @@ def setup_prompts() -> None:
             "name": PROMPT_NAME,
             "type": "text",
             "prompt": PROMPT_TEMPLATE_V2,
-            "tags": ["candidate"],
-            "isActive": False,
+            "labels": ["candidate"],
         }
 
         result_v2 = make_api_call(public_key, secret_key, base_url, v2_payload)
