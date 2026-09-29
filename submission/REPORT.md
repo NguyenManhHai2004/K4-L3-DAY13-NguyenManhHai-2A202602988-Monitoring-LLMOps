@@ -42,7 +42,7 @@ Baseline được đo bằng cách chạy lại starter code (commit `13b6066`) 
 | `pytest` | 22 passed | 26 passed | Thêm 4 test PII: CCCD, thẻ (3 định dạng), hộ chiếu, và kiểm tra không scrub nhầm correlation ID/hash/số liệu |
 | Số traces hợp lệ | 27 trace chỉ có root, không có child | 19 trace đủ root + `retriever` + `generation` | Tổng 66 trace trong project; 20 trace giữa chừng có retriever mang type SPAN (lỗi type đã sửa) |
 | Số PII leak | 0 | 0 | Baseline đã scrub `message_preview` qua `summarize_text`; `scrub_event` bổ sung lớp bảo vệ ở tầng logger |
-| Latency P95 / TTFT P95 | 152 ms / 51 ms | Bình thường: 1298 ms / 51 ms; khi incident: 2653 ms | P95 1298 ms là do request đầu tiên sau mỗi lần khởi động API (cold start lấy prompt từ Langfuse); các request còn lại khoảng 150 ms |
+| Latency P95 / TTFT P95 | 152 ms / 51 ms | Bình thường: 1298 ms / 51 ms; khi incident: 2654 ms / 56 ms | P95 1298 ms là do request đầu tiên sau mỗi lần khởi động API (cold start lấy prompt từ Langfuse); các request còn lại khoảng 150 ms |
 | Retrieval success rate | 100% | 100% | Incident `rag_slow` làm chậm retriever nhưng không làm retriever lỗi |
 
 ## 4. Logging và PII
@@ -50,7 +50,7 @@ Baseline được đo bằng cách chạy lại starter code (commit `13b6066`) 
 - **Cách tạo/nhận và truyền correlation ID:** `CorrelationIdMiddleware` ([app/middleware.py](../app/middleware.py)) gọi `clear_contextvars()` ở đầu mỗi request để không rò context từ request trước. Middleware lấy `x-request-id` từ header; nếu không có thì sinh `req-<8-hex>` bằng `uuid.uuid4().hex[:8]`. ID được bind vào structlog contextvars, lưu vào `request.state` để truyền sang `LabAgent.run` và trace metadata, rồi trả lại qua header `x-request-id` cùng `x-response-time-ms`.
 - **Các metadata được ghi vào structured log:** `correlation_id` (middleware); `user_id_hash` (12 ký tự đầu SHA-256 của `user_id`), `session_id`, `feature`, `model` (`claude-sonnet-4-5`, lấy từ `agent.model` để khớp với trace), `env` được bind trong `/chat` trước `request_received`; processor thêm `level`, `ts`; mỗi event thêm `service`, `event`, và `response_sent` có thêm `latency_ms`, `ttft_ms`, `tokens_in/out`, `cost_usd`, `quality_score`, `tool_name`, `tool_success`.
 - **Cách bảo đảm PII được scrub trước khi ghi:** `scrub_event` được đăng ký trong processor chain ([app/logging_config.py](../app/logging_config.py)) ngay sau `TimeStamper` và trước `JsonlFileProcessor`/`JSONRenderer`, nên dữ liệu được redact trước khi serialize hoặc ghi file. Pattern trong [app/pii.py](../app/pii.py) thay email, số điện thoại Việt Nam (`+84`/`0` + 9 số, có hoặc không có dấu cách/chấm/gạch), CCCD 12 số, thẻ 16 số (liền, cách hoặc gạch) và hộ chiếu Việt Nam (1 chữ in hoa + 7 số, pattern tự bổ sung) bằng `[REDACTED_<TYPE>]`. Raw `user_id` không bao giờ được log, chỉ log hash.
-- **Cách kiểm chứng kết quả:** Sau khi lưu baseline, xóa `data/logs.jsonl`, khởi động lại API và chạy lại load test. `validate_logs.py` đạt 100/100 trên 126 record, 56 correlation ID, 0 PII leak (`evidence/02-log-validator.png`). Header `x-request-id: req-5aa0a281` được kiểm tra bằng `curl -i`. `evidence/05-pii-redaction.png` cho thấy email trong câu hỏi được thay bằng `[REDACTED_EMAIL]`.
+- **Cách kiểm chứng kết quả:** Sau khi lưu baseline, xóa `data/logs.jsonl`, khởi động lại API và chạy lại load test. `validate_logs.py` đạt 100/100 trên 48 record, 21 correlation ID, 0 PII leak (`evidence/02-log-validator.png`); chạy lại trên toàn bộ log ở commit cuối vẫn đạt 100/100. Header `x-request-id: req-5aa0a281` được kiểm tra bằng `curl -i`. `evidence/05-pii-redaction.png` cho thấy email trong câu hỏi được thay bằng `[REDACTED_EMAIL]`.
 
 ## 5. Tracing và prompt versioning
 
@@ -111,7 +111,7 @@ Baseline được đo bằng cách chạy lại starter code (commit `13b6066`) 
 
   Lúc bình thường (`evidence/11-dashboard-overview.png`, 20 request): P50 152 ms, P95 1298 ms, TTFT P95 51 ms, error 0%, retrieval 100%, cost 0.041 USD, 3248 tokens, quality 0.88.
 - **SLO và lý do chọn:** `fast_successful_requests` trong cửa sổ 28 ngày; SLI = số `response_sent` có `latency_ms ≤ 3000` / tổng `request_received`; target 99.5%. Baseline đo được P95 152 ms khi ổn định và khoảng 1.1–1.8 s ở request cold start, nên 3000 ms vẫn còn dư cho cold start mà không cảnh báo nhầm. Guardrails: error ≤ 2%, cost ≤ 2.50 USD/ngày, quality ≥ 0.75, retrieval success ≥ 90%. Challenge cho thấy ngưỡng này quá lỏng với feature `monitoring` (xem mục 7, preventive measure).
-- **Cách tính error budget:** SLI tính theo request, nên error budget = 100% − 99.5% = 0.5% số request trong 28 ngày. Với lưu lượng tối thiểu 1 req/phút: 28 × 24 × 60 = 40 320 request, suy ra được phép tối đa khoảng 201 request chậm hoặc lỗi. Nếu 60 phút có tỷ lệ request xấu 20% (như lúc incident nếu áp ngưỡng 2000 ms của challenge: 5/25 request), burn rate = 20% / 0.5% = 40 lần, tức ngân sách 28 ngày sẽ cạn trong khoảng 17 giờ.
+- **Cách tính error budget:** SLI tính theo request, nên error budget = 100% − 99.5% = 0.5% số request trong 28 ngày. Với lưu lượng tối thiểu 1 req/phút: 28 × 24 × 60 = 40 320 request, suy ra được phép tối đa khoảng 201 request chậm hoặc lỗi. Nếu 60 phút có tỷ lệ request xấu khoảng 20% (như lúc incident nếu áp ngưỡng 2000 ms của challenge: 10/49 request trong `evidence/12-incident-metric.png`), burn rate = 20% / 0.5% = 40 lần, tức ngân sách 28 ngày sẽ cạn trong khoảng 17 giờ.
 - **Ba alert và runbook tương ứng** ([config/alert_rules.yaml](../config/alert_rules.yaml), runbook chi tiết ở [docs/alerts.md](../docs/alerts.md)):
   1. `high_tail_latency`: critical, P95 latency > 3000 ms trong 5 phút, owner `platform-team`, Slack `#incidents`. Runbook: xem panel latency, lấy correlation ID chậm trong log, mở waterfall để xác định retriever hay generation chậm.
   2. `retrieval_failure_spike`: high, retrieval success < 90% trong 10 phút, owner `rag-team`, Slack `#incidents`. Runbook: lọc log `tool_success=false`, xem `error_type`, kiểm tra span `retriever` có exception.
@@ -137,7 +137,7 @@ Baseline được đo bằng cách chạy lại starter code (commit `13b6066`) 
 - **Một quyết định kỹ thuật quan trọng và lý do:** Tắt `capture_input/capture_output` trên cả ba observation và chỉ gửi metadata đã được kiểm soát (hash user, `query_preview` đã scrub, usage, cost) lên Langfuse. Log local được scrub bằng processor, nhưng Langfuse là hệ thống bên ngoài; nếu capture raw input thì PII sẽ rời khỏi hệ thống trước khi kịp scrub. Đánh đổi là trace không cho xem nguyên văn câu hỏi, nên phải dùng `correlation_id` để quay lại log đã scrub.
 - **Một lỗi/blocker đã gặp:** Các trace đầu tiên báo `prompt_source=local-fallback` vì project chưa có prompt `day13-chat`. Sau khi tạo prompt bằng script, label `baseline` và `candidate` vẫn không xuất hiện trên Langfuse.
 - **Cách tìm nguyên nhân và xử lý:** Đọc lại prompt qua API thì thấy v1 chỉ có label `production`, còn `candidate` nằm trong `tags`: script đã gửi label vào nhầm field `tags`. Sửa script dùng field `labels` và cập nhật label của các version hiện có qua `prompt_version.update`. Các blocker khác: `GET /api/public/traces` trả 410 cho organization mới nên chuyển sang `/api/public/v2/observations`; trace bị mất khi API bị kill ngay sau request nên phải chờ SDK flush; type `retrieval` không hợp lệ nên Langfuse hiển thị span retriever là SPAN, sửa thành `retriever`.
-- **Cách hiểu luồng Metrics → Logs → Traces:** Metrics trả lời "có vấn đề không và khi nào" (P95 tăng lên 2653 ms lúc 16:47). Logs trả lời "request nào bị ảnh hưởng" (lọc theo thời gian và feature, lấy `req-7601dc00`). Traces trả lời "chậm ở bước nào" (waterfall cho thấy `retriever` 2.50 s). `correlation_id` là khóa nối log với trace.
+- **Cách hiểu luồng Metrics → Logs → Traces:** Metrics trả lời "có vấn đề không và khi nào" (P95 tăng lên 2654 ms lúc 17:26). Logs trả lời "request nào bị ảnh hưởng" (lọc theo thời gian và feature, lấy `req-ecd209a4`). Traces trả lời "chậm ở bước nào" (waterfall cho thấy `retriever` 2.50 s). `correlation_id` là khóa nối log với trace.
 - **Vai trò của prompt version, token/cost, SLO hoặc rollback trong vận hành LLM:** Prompt version gắn vào mỗi trace giúp biết chính xác request nào dùng prompt nào; khi chất lượng hoặc latency thay đổi có thể so sánh v1/v2 trên cùng input, và rollback chỉ là chuyển label mà không cần deploy code. Token/cost gắn trên generation giúp phát hiện prompt dài ra hoặc output phình to. SLO và error budget cho biết khi nào cần dừng thay đổi và tập trung vào độ ổn định.
 - **Điều quan trọng nhất đã học:** Một alert chỉ có ích nếu ngưỡng khớp với trải nghiệm người dùng: incident vượt ngưỡng 2000 ms của challenge nhưng alert đặt ở 3000 ms nên im lặng. Phải kiểm tra alert bằng một incident thật chứ không chỉ kiểm tra cú pháp YAML.
 - **Hạn chế hoặc phần chưa hoàn thành, nếu có:**
@@ -148,10 +148,10 @@ Baseline được đo bằng cách chạy lại starter code (commit `13b6066`) 
 
 ## 9. Checklist trước khi nộp
 
-- [ ] Kết quả và evidence thuộc commit SHA cuối.
+- [x] Kết quả và evidence thuộc commit SHA cuối.
 - [x] Tất cả ảnh/output mở được bằng đường dẫn tương đối.
 - [x] Incident evidence nối đúng metric → log → trace.
-- [ ] Trace/prompt evidence thuộc project Langfuse cá nhân và ảnh không lộ key/secret.
+- [x] Trace/prompt evidence thuộc project Langfuse cá nhân và ảnh không lộ key/secret.
 - [x] Repository chạy lại được theo README.
-- [ ] Không có secret, API key, PII thô hoặc evidence của người khác/lớp khác.
+- [x] Không có secret, API key, PII thô hoặc evidence của người khác/lớp khác.
 - [ ] URL repo và commit SHA cuối đã được nộp trên LMS/Codelabs.
